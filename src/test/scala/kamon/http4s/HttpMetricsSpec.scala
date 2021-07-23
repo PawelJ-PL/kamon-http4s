@@ -17,18 +17,19 @@
 package kamon.http4s
 
 import cats.effect._
+import cats.effect.unsafe.IORuntime
 import kamon.testkit.InstrumentInspection
 import org.http4s.HttpRoutes
 import org.http4s.dsl.io._
 import org.http4s.server.Server
-import org.http4s.server.blaze.BlazeServerBuilder
 import org.scalatest.concurrent.Eventually
 import org.scalatest.time.SpanSugar
 import org.scalatest.{Matchers, OptionValues, WordSpec}
 import cats.implicits._
 import kamon.http4s.middleware.server.KamonSupport
 import kamon.instrumentation.http.HttpServerMetrics
-import org.http4s.client.blaze.BlazeClientBuilder
+import org.http4s.blaze.client.BlazeClientBuilder
+import org.http4s.blaze.server.BlazeServerBuilder
 import org.http4s.client.Client
 
 import scala.concurrent.ExecutionContext
@@ -41,12 +42,10 @@ class HttpMetricsSpec extends WordSpec
   with InstrumentInspection.Syntax
   with OptionValues
  {
-
-  implicit val contextShift: ContextShift[IO] = IO.contextShift(ExecutionContext.global)
-  implicit val timer: Timer[IO] = IO.timer(ExecutionContext.global)
+   private implicit val runtime: IORuntime = cats.effect.unsafe.IORuntime.global
 
   val srv =
-    BlazeServerBuilder[IO]
+    BlazeServerBuilder[IO](ExecutionContext.global)
       .bindLocal(43567)
       .withHttpApp(KamonSupport(HttpRoutes.of[IO] {
         case GET -> Root / "tracing" / "ok" =>  Ok("ok")
@@ -59,13 +58,13 @@ class HttpMetricsSpec extends WordSpec
     BlazeClientBuilder[IO](ExecutionContext.global).withMaxTotalConnections(10).resource
 
    val metrics =
-    Resource.liftF(IO(HttpServerMetrics.of("http4s.server", "/127.0.0.1", 43567)))
+    Resource.eval(IO(HttpServerMetrics.of("http4s.server", "/127.0.0.1", 43567)))
 
 
-  def withServerAndClient[A](f: (Server[IO], Client[IO], HttpServerMetrics.HttpServerInstruments) => IO[A]): A =
+  def withServerAndClient[A](f: (Server, Client[IO], HttpServerMetrics.HttpServerInstruments) => IO[A]): A =
    (srv, client, metrics).tupled.use(f.tupled).unsafeRunSync()
 
-  private def get[F[_]: Sync](path: String)(server: Server[F], client: Client[F]): F[String] = {
+  private def get[F[_]: Concurrent](path: String)(server: Server, client: Client[F]): F[String] = {
     client.expect[String](s"http://127.0.0.1:${server.address.getPort}$path")
   }
 
