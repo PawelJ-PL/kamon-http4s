@@ -16,6 +16,7 @@
 
 package kamon.http4s
 
+import cats.effect.kernel.Concurrent
 import cats.effect.unsafe.IORuntime
 import cats.effect.{IO, Sync}
 import kamon.http4s.middleware.server.KamonSupport
@@ -65,7 +66,7 @@ class ServerInstrumentationSpec extends WordSpec
   def withServerAndClient[A](f: (Server, Client[IO]) => IO[A]): A =
     (srv, client).tupled.use(f.tupled).unsafeRunSync()
 
-  private def getResponse[F[_]: Sync](path: String)(server: Server, client: Client[F]): F[(String, Headers)] = {
+  private def getResponse[F[_]: Concurrent](path: String)(server: Server, client: Client[F]): F[(String, Headers)] = {
     client.get(s"http://127.0.0.1:${server.address.getPort}$path"){ r =>
       r.bodyText.compile.toList.map(_.mkString).map(_ -> r.headers)
     }
